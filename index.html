@@ -197,7 +197,7 @@ details p { margin: 0 0 8px; }
       <li>Come back here, paste, and tap <strong>Add corner</strong>.</li>
       <li>Walk to the next corner and repeat. Go around the farm in order, all the way back to the first corner.</li>
     </ol>
-    <p class="fine">The <strong>Use phone GPS</strong> button may not work inside the Claude app. Google Maps always works.</p>
+    <p class="fine">Or tap <strong>Use phone GPS</strong> while standing on the corner. It reads the GPS for 15 seconds and averages it. Tap again to add the corner sooner. This works when the page is opened in Chrome at <span class="mono">surajkm20.github.io/farm-area-calculator</span>, not inside the Claude app.</p>
   </section>
 
   <details>
@@ -461,22 +461,81 @@ details p { margin: 0 0 8px; }
     $("coordInput").value = "";
   });
 
-  $("gpsBtn").addEventListener("click", function () {
-    var btn = this;
-    if (!navigator.geolocation) { setMsg("addMsg", "Phone GPS isn't available here. Copy the location from Google Maps instead (steps below).", "err"); return; }
-    btn.disabled = true; setMsg("addMsg", "Getting your location. Stand still…");
-    try {
-      navigator.geolocation.getCurrentPosition(function (pos) {
-        btn.disabled = false;
-        addPoints([[pos.coords.latitude, pos.coords.longitude]], "from GPS (±" + Math.round(pos.coords.accuracy) + " m)");
-      }, function () {
-        btn.disabled = false;
-        setMsg("addMsg", "Phone GPS isn't available inside this page. Copy the location from Google Maps instead (steps below).", "err");
-      }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-    } catch (e) {
-      btn.disabled = false;
-      setMsg("addMsg", "Phone GPS isn't available inside this page. Copy the location from Google Maps instead (steps below).", "err");
+  // GPS: collect readings for GPS_SECONDS, then add the accuracy-weighted average of the good ones.
+  var GPS_SECONDS = 15;
+  var SITE = "https://surajkm20.github.io/farm-area-calculator/";
+  var gps = null;
+  var framed = true;
+  try { framed = window.self !== window.top; } catch (e) {}
+
+  function gpsError(err) {
+    var code = err && err.code;
+    var m;
+    if (!navigator.geolocation || !window.isSecureContext) {
+      m = "Phone GPS isn't available in this browser. Open " + SITE + " in Chrome, or copy the location from Google Maps (steps below).";
+    } else if (code === 1 && framed) {
+      m = "Phone GPS is blocked inside this app. Open " + SITE + " in Chrome instead.";
+    } else if (code === 1) {
+      m = "Location permission is blocked. In Chrome, tap the icon to the left of the web address, then Permissions, then Location, and choose Allow. Also check phone Settings > Apps > Chrome > Permissions > Location is allowed. Then reload this page.";
+    } else if (code === 2) {
+      m = "The phone couldn't find your location. Turn on Location from the quick settings at the top of the screen, then try again.";
+    } else if (code === 3) {
+      m = "No GPS signal yet. Check that Location is on, stand in the open away from trees for a minute, and try again.";
+    } else {
+      m = "Phone GPS didn't work here. Open " + SITE + " in Chrome, or copy the location from Google Maps (steps below).";
     }
+    setMsg("addMsg", m, "err");
+  }
+
+  function stopGps() {
+    if (!gps) return;
+    try { if (gps.watch != null) navigator.geolocation.clearWatch(gps.watch); } catch (e) {}
+    clearTimeout(gps.timer); clearInterval(gps.tick);
+    gps = null;
+    $("gpsBtn").textContent = "Use phone GPS";
+  }
+
+  function finishGps() {
+    var r = gps ? gps.readings : [];
+    stopGps();
+    if (!r.length) { gpsError({ code: 3 }); return; }
+    var best = Math.min.apply(null, r.map(function (x) { return x.acc; }));
+    var good = r.filter(function (x) { return x.acc <= Math.max(best * 1.5, best + 3); });
+    var w = 0, la = 0, lo = 0;
+    good.forEach(function (x) { var k = 1 / (x.acc * x.acc); w += k; la += x.lat * k; lo += x.lng * k; });
+    addPoints([[la / w, lo / w]], "from GPS, " + good.length + " reading" + (good.length > 1 ? "s" : "") + " averaged (±" + Math.round(best) + " m)");
+  }
+
+  $("gpsBtn").addEventListener("click", function () {
+    if (gps) { finishGps(); return; }
+    if (!navigator.geolocation || !window.isSecureContext) { gpsError(null); return; }
+    gps = { readings: [], start: Date.now(), watch: null };
+    $("gpsBtn").textContent = "Add corner now";
+    setMsg("addMsg", "Getting your location. Stand still at the corner…");
+    try {
+      gps.watch = navigator.geolocation.watchPosition(function (pos) {
+        if (!gps) return;
+        gps.readings.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy || 99 });
+      }, function (err) {
+        if (!gps) return;
+        if (err && err.code === 3) return; // keep waiting; the overall timer decides
+        stopGps(); gpsError(err);
+      }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    } catch (e) { stopGps(); gpsError(null); return; }
+    gps.tick = setInterval(function () {
+      if (!gps) return;
+      var n = gps.readings.length;
+      var left = Math.max(0, GPS_SECONDS - Math.floor((Date.now() - gps.start) / 1000));
+      if (!n) { setMsg("addMsg", "Waiting for GPS signal. Stand in the open…"); return; }
+      var best = Math.round(Math.min.apply(null, gps.readings.map(function (x) { return x.acc; })));
+      setMsg("addMsg", "Reading GPS: " + n + " reading" + (n > 1 ? "s" : "") + ", best ±" + best + " m. Adding in " + left + " s. Stand still.");
+    }, 1000);
+    gps.timer = setTimeout(function check() {
+      if (!gps) return;
+      if (gps.readings.length) finishGps();
+      else if (Date.now() - gps.start < 45000) gps.timer = setTimeout(check, 3000);
+      else { stopGps(); gpsError({ code: 3 }); }
+    }, GPS_SECONDS * 1000);
   });
 
   $("cornerList").addEventListener("click", function (e) {
