@@ -11,6 +11,12 @@ A free, no-ads web page for measuring farm land without a tape. Stand at each co
 
 After three corners it shows the area, the farm's shape, and the length of each side. Corners are saved on your phone, so you can close the page and come back.
 
+### Plantation and borewell
+
+Choose **Plantation** at the top of *Add a point* and walk the plantation's corners the same way. The page shows its area, what share of the farm it covers, and the open land left (farm minus plantation).
+
+Choose **Borewell**, stand next to it and add one point. It appears as a pin on the drawing, with its distance from the nearest side of the farm.
+
 ## Units
 
 - 1 acre = 40 guntas = 43,560 sq ft
