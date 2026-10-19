@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Farm Corner Calculator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;700&family=Hind:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+Kannada:wght@500&display=swap">
+<style>
+/* Layout: one narrow column, a field tool held in one hand — result and shape first, then add corners, then the corner list and how-to. */
+:root {
+  --bg: #F1F4EE;
+  --surface: #FFFFFF;
+  --surface-2: #E6ECE2;
+  --ink: #1C2920;
+  --muted: #56655A;
+  --line: #CBD5C7;
+  --accent: #2C6A3A;
+  --accent-ink: #FFFFFF;
+  --plot: #D49B12;
+  --plot-fill: rgba(212,155,18,.22);
+  --warn-bg: #FBEFD3;
+  --warn-ink: #6B4A00;
+  --bad: #A3362A;
+  --font-display: "Zilla Slab", Georgia, "Times New Roman", serif;
+  --font-body: "Hind", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-kn: "Noto Sans Kannada", "Tunga", sans-serif;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111713; --surface: #18211B; --surface-2: #212C24; --ink: #E4EBE2; --muted: #9AAA9D;
+    --line: #314035; --accent: #72BF80; --accent-ink: #0E1A11; --plot: #E6B547; --plot-fill: rgba(230,181,71,.20);
+    --warn-bg: #3A2F12; --warn-ink: #F2D58C; --bad: #F08A7C; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111713; --surface: #18211B; --surface-2: #212C24; --ink: #E4EBE2; --muted: #9AAA9D;
+  --line: #314035; --accent: #72BF80; --accent-ink: #0E1A11; --plot: #E6B547; --plot-fill: rgba(230,181,71,.20);
+  --warn-bg: #3A2F12; --warn-ink: #F2D58C; --bad: #F08A7C; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.5;
+}
+.wrap {
+  max-width: 560px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: 1.75rem; font-weight: 700; line-height: 1.15; }
+h2 { font-size: 1.2rem; font-weight: 700; }
+.kn { font-family: var(--font-kn); font-weight: 500; }
+.sub { color: var(--muted); margin: 4px 0 0; font-size: .95rem; }
+.label { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.banner {
+  background: var(--warn-bg); color: var(--warn-ink);
+  border-radius: var(--r); padding: 10px 12px;
+  display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  font-size: .95rem;
+}
+
+.result { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.result-top { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.rtc { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.rtc-part { display: flex; flex-direction: column; }
+.rtc-num { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.rtc-unit { font-size: .85rem; color: var(--muted); }
+.rtc-sep { font-family: var(--font-display); font-size: 2rem; color: var(--line); }
+.rtc-note { font-size: .85rem; color: var(--muted); }
+.empty-msg { color: var(--muted); font-size: 1rem; }
+
+.shape { background: var(--surface-2); border-top: 1px solid var(--line); }
+.shape svg { display: block; width: 100%; height: auto; }
+
+.units { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); border-top: 1px solid var(--line); }
+.unit { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.unit:nth-child(odd) { border-right: 1px solid var(--line); }
+.unit .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1rem; }
+.result-actions { padding: 12px 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+.warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 8px 12px; font-size: .92rem; }
+
+.panel { display: flex; flex-direction: column; gap: 10px; }
+textarea {
+  width: 100%; min-height: 76px; resize: vertical;
+  font-family: var(--font-mono); font-size: 1rem;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+}
+textarea:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+button {
+  font: inherit; font-weight: 600; font-size: .98rem;
+  border-radius: 8px; padding: 11px 16px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  min-height: 46px;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1 1 160px; }
+button.small { min-height: 36px; padding: 6px 12px; font-size: .9rem; }
+button.link { background: none; border: none; padding: 6px 4px; min-height: 0; color: var(--accent); text-decoration: underline; }
+button:disabled { opacity: .5; cursor: default; }
+.msg { font-size: .92rem; min-height: 1.4em; color: var(--muted); }
+.msg.err { color: var(--bad); }
+.msg.ok { color: var(--accent); }
+
+.corners { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.corners li { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.corners li:last-child { border-bottom: none; }
+.tag { width: 28px; height: 28px; border-radius: 50%; background: var(--plot); color: #1C1600; font-weight: 700; display: grid; place-items: center; font-family: var(--font-display); }
+.coord { font-family: var(--font-mono); font-size: .9rem; overflow-wrap: anywhere; }
+.side { font-size: .85rem; color: var(--muted); }
+.del { min-height: 36px; padding: 4px 10px; font-size: .85rem; color: var(--bad); }
+.corners .none { display: block; color: var(--muted); padding: 14px; }
+
+.steps { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; }
+.steps li { padding-left: 2px; }
+.fine { font-size: .9rem; color: var(--muted); margin: 0; }
+details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
+details > summary { cursor: pointer; font-weight: 600; }
+details[open] > summary { margin-bottom: 10px; }
+details p { margin: 0 0 8px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .shape polygon { transition: opacity .2s; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Farm Corner Calculator</h1>
+    <p class="sub">Stand at each corner of your land, add its location, and get the area in <span class="kn">ಎಕರೆ</span> acres and <span class="kn">ಗುಂಟೆ</span> guntas.</p>
+  </header>
+
+  <div class="banner" id="exampleBanner" hidden>
+    <span>This is an example farm, not yours.</span>
+    <button class="small" id="startBtn" type="button">Start my farm</button>
+  </div>
+
+  <section class="result" aria-live="polite">
+    <div class="result-top">
+      <span class="label">Area, in RTC format</span>
+      <div id="rtc"></div>
+      <div class="rtc-note" id="rtcNote"></div>
+    </div>
+    <div class="shape" id="shape"></div>
+    <div class="units" id="units"></div>
+    <div class="result-actions">
+      <button class="small" id="copyBtn" type="button">Copy result</button>
+      <span class="msg" id="copyMsg"></span>
+    </div>
+  </section>
+
+  <div class="warn" id="crossWarn" hidden>The sides of your shape cross each other. The corners may be out of order. Add corners in order as you walk around the boundary.</div>
+
+  <section class="panel">
+    <h2>Add a corner</h2>
+    <label class="fine" for="coordInput">Paste the latitude and longitude, like <span class="mono">12.523000, 76.897000</span>. You can paste several corners, one per line.</label>
+    <textarea id="coordInput" placeholder="12.523000, 76.897000" inputmode="text" autocomplete="off" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="primary" id="addBtn" type="button">Add corner</button>
+      <button id="gpsBtn" type="button">Use phone GPS</button>
+    </div>
+    <div class="msg" id="addMsg"></div>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2>Corners</h2>
+      <div class="row">
+        <button class="small" id="undoBtn" type="button">Undo last</button>
+        <button class="small" id="clearBtn" type="button">Clear all</button>
+      </div>
+    </div>
+    <div class="msg" id="clearMsg" hidden></div>
+    <ul class="corners" id="cornerList"></ul>
+  </section>
+
+  <section class="panel">
+    <h2>How to get a corner's location</h2>
+    <ol class="steps">
+      <li>Stand on the corner of your farm and open <strong>Google Maps</strong>. Wait until the blue dot stops moving.</li>
+      <li>Press and hold your finger on the blue dot. A red pin drops there.</li>
+      <li>The numbers appear in the search bar at the top, like <span class="mono">12.523000, 76.897000</span>. Tap them to copy.</li>
+      <li>Come back here, paste, and tap <strong>Add corner</strong>.</li>
+      <li>Walk to the next corner and repeat. Go around the farm in order, all the way back to the first corner.</li>
+    </ol>
+    <p class="fine">The <strong>Use phone GPS</strong> button may not work inside the Claude app. Google Maps always works.</p>
+  </section>
+
+  <details>
+    <summary>How accurate is this?</summary>
+    <p>Phone GPS is usually off by 3 to 5 metres at each corner. For a farm of an acre or more, the total area is usually close, often within a few guntas.</p>
+    <p>Under coconut or arecanut trees, near hills, or next to buildings, GPS is weaker. Stand still for 20 to 30 seconds at each corner before copying the location.</p>
+    <p>This is for your own planning. For sale, partition or a boundary dispute, get an official survey through the Bhoomi survey department.</p>
+  </details>
+
+  <details>
+    <summary>Karnataka land units</summary>
+    <p>1 acre = 40 guntas. 1 gunta = 16 aane = 1,089 sq ft (about 101 sq m).</p>
+    <p>Your RTC (Pahani) writes area as acres-guntas-aane, for example 2-12-6 means 2 acres, 12 guntas and 6 aane.</p>
+    <p>1 acre = 100 cents = 43,560 sq ft = 0.4047 hectare.</p>
+  </details>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "farm-corner-calculator-v1";
+  var ACRE_M2 = 4046.8564224;
+  var GUNTA_M2 = ACRE_M2 / 40;
+  var SQFT_M2 = 0.09290304;
+  var EXAMPLE = [
+    [12.523000, 76.897000],
+    [12.523030, 76.897880],
+    [12.522210, 76.897840],
+    [12.522180, 76.897420],
+    [12.522260, 76.896990]
+  ];
+
+  var state = { corners: EXAMPLE.slice(), example: true };
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || "null");
+    if (saved && Array.isArray(saved.corners)) state = { corners: saved.corners, example: !!saved.example };
+  } catch (e) {}
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  function letter(i) { return i < 26 ? LETTERS[i] : LETTERS[Math.floor(i / 26) - 1] + LETTERS[i % 26]; }
+  function fmt(n, d) { return n.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+
+  // Local flat projection around the centroid (metres). Accurate for farm-sized areas.
+  function project(pts) {
+    var lat0 = 0, lng0 = 0;
+    pts.forEach(function (p) { lat0 += p[0]; lng0 += p[1]; });
+    lat0 /= pts.length; lng0 /= pts.length;
+    var phi = lat0 * Math.PI / 180;
+    var mLat = 111132.954 - 559.822 * Math.cos(2 * phi) + 1.175 * Math.cos(4 * phi);
+    var mLng = 111412.84 * Math.cos(phi) - 93.5 * Math.cos(3 * phi);
+    return pts.map(function (p) { return [(p[1] - lng0) * mLng, (p[0] - lat0) * mLat]; });
+  }
+
+  function areaM2(xy) {
+    var s = 0;
+    for (var i = 0; i < xy.length; i++) {
+      var a = xy[i], b = xy[(i + 1) % xy.length];
+      s += a[0] * b[1] - b[0] * a[1];
+    }
+    return Math.abs(s) / 2;
+  }
+
+  function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+  function segCross(p1, p2, p3, p4) {
+    function o(a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
+    var d1 = o(p3, p4, p1), d2 = o(p3, p4, p2), d3 = o(p1, p2, p3), d4 = o(p1, p2, p4);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
+  }
+
+  function selfIntersects(xy) {
+    var n = xy.length;
+    if (n < 4) return false;
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+        if (segCross(xy[i], xy[(i + 1) % n], xy[j], xy[(j + 1) % n])) return true;
+      }
+    }
+    return false;
+  }
+
+  // Parse one line: decimal "12.52, 76.89", Google Maps URL "@12.52,76.89", or DMS 12°31'22.8"N 76°53'49.2"E
+  function parseLine(line) {
+    line = line.trim();
+    if (!line) return null;
+    var dms = /(\d{1,3})\s*[°º]\s*(\d{1,2})\s*['′]\s*([\d.]+)\s*(?:"|″|'')?\s*([NSEW])/gi;
+    var m, vals = [];
+    while ((m = dms.exec(line)) !== null) {
+      var v = +m[1] + (+m[2]) / 60 + (+m[3]) / 3600;
+      var h = m[4].toUpperCase();
+      if (h === "S" || h === "W") v = -v;
+      vals.push({ v: v, h: h });
+    }
+    var lat, lng;
+    if (vals.length >= 2) {
+      var la = vals.find(function (x) { return x.h === "N" || x.h === "S"; });
+      var lo = vals.find(function (x) { return x.h === "E" || x.h === "W"; });
+      if (!la || !lo) return { error: "Could not read this location: " + line };
+      lat = la.v; lng = lo.v;
+    } else {
+      var at = line.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      var nums = at ? [at[1], at[2]] : (line.match(/-?\d+(?:\.\d+)?/g) || []);
+      if (nums.length < 2) return { error: "Need two numbers (latitude, longitude): " + line };
+      lat = parseFloat(nums[0]); lng = parseFloat(nums[1]);
+    }
+    var swapped = false;
+    // Karnataka sits around 11–19°N, 74–79°E. If pasted the other way round, swap.
+    if (Math.abs(lat) > 60 && Math.abs(lng) < 60) { var t = lat; lat = lng; lng = t; swapped = true; }
+    if (!(lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180)) return { error: "These numbers are not a valid location: " + line };
+    return { pt: [lat, lng], swapped: swapped };
+  }
+
+  function addPoints(pts, how) {
+    if (state.example) { state.corners = []; state.example = false; }
+    pts.forEach(function (p) { state.corners.push(p); });
+    save(); render();
+    var n = state.corners.length;
+    var msg = (pts.length === 1 ? "Added corner " + letter(n - 1) : "Added " + pts.length + " corners") + (how ? " " + how : "") + ".";
+    if (n < 3) msg += " Add " + (3 - n) + " more to see the area.";
+    setMsg("addMsg", msg, "ok");
+  }
+
+  function setMsg(id, text, kind) {
+    var el = $(id); el.textContent = text; el.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function compute() {
+    var c = state.corners;
+    if (c.length < 3) return null;
+    var xy = project(c);
+    var a = areaM2(xy);
+    var per = 0, sides = [];
+    for (var i = 0; i < xy.length; i++) {
+      var d = dist(xy[i], xy[(i + 1) % xy.length]);
+      sides.push(d); per += d;
+    }
+    return { xy: xy, a: a, per: per, sides: sides, crosses: selfIntersects(xy) };
+  }
+
+  function rtcParts(m2) {
+    var totalAane = Math.round(m2 / GUNTA_M2 * 16);
+    var acres = Math.floor(totalAane / 640);
+    var rem = totalAane - acres * 640;
+    var guntas = Math.floor(rem / 16);
+    var aane = rem - guntas * 16;
+    return [acres, guntas, aane];
+  }
+
+  function renderShape(r) {
+    var W = 340, H = 240, pad = 34;
+    if (!r) {
+      var c = state.corners;
+      if (c.length === 0) { $("shape").innerHTML = ""; return; }
+    }
+    var xy = r ? r.xy : project(state.corners);
+    var xs = xy.map(function (p) { return p[0]; }), ys = xy.map(function (p) { return p[1]; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    var spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+    var s = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
+    var ox = (W - spanX * s) / 2, oy = (H - spanY * s) / 2;
+    var P = xy.map(function (p) { return [ox + (p[0] - minX) * s, H - (oy + (p[1] - minY) * s)]; });
+    var pts = P.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Shape of the farm from the corners">';
+    if (P.length >= 3) svg += '<polygon points="' + pts + '" fill="var(--plot-fill)" stroke="var(--plot)" stroke-width="2.5" stroke-linejoin="round"/>';
+    else if (P.length === 2) svg += '<polyline points="' + pts + '" fill="none" stroke="var(--plot)" stroke-width="2.5" stroke-dasharray="6 5"/>';
+    // side labels
+    if (r && P.length >= 3) {
+      var cx = 0, cy = 0; P.forEach(function (p) { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
+      for (var i = 0; i < P.length; i++) {
+        var a = P[i], b = P[(i + 1) % P.length];
+        var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        var dx = mx - cx, dy = my - cy, dl = Math.hypot(dx, dy) || 1;
+        var lx = mx + dx / dl * 14, ly = my + dy / dl * 14 + 4;
+        svg += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">' + Math.round(r.sides[i]) + ' m</text>';
+      }
+    }
+    P.forEach(function (p, i) {
+      svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="9" fill="var(--plot)" stroke="var(--surface)" stroke-width="2"/>';
+      svg += '<text x="' + p[0].toFixed(1) + '" y="' + (p[1] + 4).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="700" font-family="Zilla Slab, Georgia, serif" fill="#1C1600">' + letter(i) + '</text>';
+    });
+    svg += '<g transform="translate(' + (W - 22) + ',22)"><path d="M0,-12 L6,4 L0,0 L-6,4 Z" fill="var(--ink)"/><text y="16" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)" font-family="Hind, sans-serif">N</text></g>';
+    svg += '</svg>';
+    $("shape").innerHTML = svg;
+  }
+
+  function render() {
+    var r = compute();
+    $("exampleBanner").hidden = !state.example;
+    $("crossWarn").hidden = !(r && r.crosses);
+
+    if (r) {
+      var p = rtcParts(r.a);
+      $("rtc").innerHTML =
+        '<div class="rtc">' +
+        '<div class="rtc-part"><span class="rtc-num">' + p[0] + '</span><span class="rtc-unit">acres <span class="kn">ಎಕರೆ</span></span></div>' +
+        '<span class="rtc-sep">–</span>' +
+        '<div class="rtc-part"><span class="rtc-num">' + p[1] + '</span><span class="rtc-unit">guntas <span class="kn">ಗುಂಟೆ</span></span></div>' +
+        '<span class="rtc-sep">–</span>' +
+        '<div class="rtc-part"><span class="rtc-num">' + p[2] + '</span><span class="rtc-unit">aane <span class="kn">ಆಣೆ</span></span></div>' +
+        '</div>';
+      $("rtcNote").textContent = "Total " + fmt(r.a / GUNTA_M2, 1) + " guntas, from " + state.corners.length + " corners." + (state.example ? " Example farm." : "");
+      var u = [
+        ["Acres", fmt(r.a / ACRE_M2, 3)],
+        ["Guntas", fmt(r.a / GUNTA_M2, 1)],
+        ["Square feet", fmt(r.a / SQFT_M2, 0)],
+        ["Square metres", fmt(r.a, 0)],
+        ["Cents", fmt(r.a / ACRE_M2 * 100, 1)],
+        ["Hectares", fmt(r.a / 10000, 3)],
+        ["Boundary length", fmt(r.per, 0) + " m"],
+        ["Boundary in feet", fmt(r.per / 0.3048, 0) + " ft"]
+      ];
+      $("units").innerHTML = u.map(function (x) { return '<div class="unit"><div class="label">' + x[0] + '</div><div class="v">' + x[1] + '</div></div>'; }).join("");
+      $("units").hidden = false;
+    } else {
+      var need = 3 - state.corners.length;
+      $("rtc").innerHTML = '<p class="empty-msg">' + (state.corners.length === 0 ? "No corners yet. Add the first corner of your farm below." : "Add " + need + " more corner" + (need > 1 ? "s" : "") + " to see the area.") + '</p>';
+      $("rtcNote").textContent = "";
+      $("units").innerHTML = ""; $("units").hidden = true;
+    }
+    renderShape(r);
+
+    var list = $("cornerList");
+    if (state.corners.length === 0) {
+      list.innerHTML = '<li class="none">Corners you add will show here.</li>';
+    } else {
+      var xy = state.corners.length >= 2 ? project(state.corners) : null;
+      list.innerHTML = state.corners.map(function (c, i) {
+        var side = "";
+        if (xy && (i < state.corners.length - 1 || state.corners.length >= 3)) {
+          var j = (i + 1) % state.corners.length;
+          var d = dist(xy[i], xy[j]);
+          side = '<div class="side">' + letter(i) + ' to ' + letter(j) + ': ' + fmt(d, 1) + ' m (' + fmt(d / 0.3048, 0) + ' ft)</div>';
+        }
+        return '<li><span class="tag">' + letter(i) + '</span><div style="min-width:0"><div class="coord">' + c[0].toFixed(6) + ', ' + c[1].toFixed(6) + '</div>' + side + '</div><button class="del" type="button" data-i="' + i + '" aria-label="Remove corner ' + letter(i) + '">Remove</button></li>';
+      }).join("");
+    }
+    $("undoBtn").disabled = state.example || state.corners.length === 0;
+    $("clearBtn").disabled = state.example || state.corners.length === 0;
+    $("copyBtn").disabled = !r;
+  }
+
+  $("addBtn").addEventListener("click", function () {
+    var lines = $("coordInput").value.split(/\n|;/);
+    var pts = [], errs = [], swapped = 0;
+    lines.forEach(function (l) {
+      var r = parseLine(l);
+      if (!r) return;
+      if (r.error) errs.push(r.error); else { pts.push(r.pt); if (r.swapped) swapped++; }
+    });
+    if (!pts.length && !errs.length) { setMsg("addMsg", "Paste a location first, like 12.523000, 76.897000.", "err"); return; }
+    if (errs.length) { setMsg("addMsg", errs[0], "err"); if (!pts.length) return; }
+    addPoints(pts, swapped ? "(latitude and longitude were the other way round, so I swapped them)" : "");
+    if (errs.length) setMsg("addMsg", "Added " + pts.length + ", but skipped a line. " + errs[0], "err");
+    $("coordInput").value = "";
+  });
+
+  $("gpsBtn").addEventListener("click", function () {
+    var btn = this;
+    if (!navigator.geolocation) { setMsg("addMsg", "Phone GPS isn't available here. Copy the location from Google Maps instead (steps below).", "err"); return; }
+    btn.disabled = true; setMsg("addMsg", "Getting your location. Stand still…");
+    try {
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        btn.disabled = false;
+        addPoints([[pos.coords.latitude, pos.coords.longitude]], "from GPS (±" + Math.round(pos.coords.accuracy) + " m)");
+      }, function () {
+        btn.disabled = false;
+        setMsg("addMsg", "Phone GPS isn't available inside this page. Copy the location from Google Maps instead (steps below).", "err");
+      }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    } catch (e) {
+      btn.disabled = false;
+      setMsg("addMsg", "Phone GPS isn't available inside this page. Copy the location from Google Maps instead (steps below).", "err");
+    }
+  });
+
+  $("cornerList").addEventListener("click", function (e) {
+    var b = e.target.closest("button.del");
+    if (!b) return;
+    if (state.example) { state.corners = state.corners.slice(); state.example = false; }
+    state.corners.splice(+b.getAttribute("data-i"), 1);
+    save(); render();
+  });
+
+  $("undoBtn").addEventListener("click", function () {
+    state.corners.pop(); save(); render();
+    setMsg("addMsg", "Removed the last corner.");
+  });
+
+  // Two-tap clear (the page can't show confirm dialogs)
+  var clearArmed = false, clearTimer = null;
+  $("clearBtn").addEventListener("click", function () {
+    if (!clearArmed) {
+      clearArmed = true; this.textContent = "Tap again to clear";
+      var self = this;
+      clearTimer = setTimeout(function () { clearArmed = false; self.textContent = "Clear all"; }, 4000);
+      return;
+    }
+    clearTimeout(clearTimer); clearArmed = false; this.textContent = "Clear all";
+    state.corners = []; state.example = false; save(); render();
+    setMsg("addMsg", "All corners cleared.");
+  });
+
+  $("startBtn").addEventListener("click", function () {
+    state.corners = []; state.example = false; save(); render();
+    $("coordInput").focus();
+  });
+
+  $("copyBtn").addEventListener("click", function () {
+    var r = compute(); if (!r) return;
+    var p = rtcParts(r.a);
+    var text = "Farm area: " + p[0] + " acres " + p[1] + " guntas " + p[2] + " aane\n" +
+      fmt(r.a / ACRE_M2, 3) + " acres = " + fmt(r.a / SQFT_M2, 0) + " sq ft = " + fmt(r.a, 0) + " sq m\n" +
+      "Boundary: " + fmt(r.per, 0) + " m\nCorners:\n" +
+      state.corners.map(function (c, i) { return letter(i) + ": " + c[0].toFixed(6) + ", " + c[1].toFixed(6); }).join("\n");
+    function done(ok) { setMsg("copyMsg", ok ? "Copied." : "Couldn't copy. Select the numbers above by hand.", ok ? "ok" : "err"); }
+    try {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    } catch (e) { done(false); }
+  });
+
+  render();
+})();
+</script>
+
+</body>
+</html>
