@@ -11,6 +11,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;700&family=Hind:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+Kannada:wght@500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 /* Layout: one narrow column, a field tool held in one hand — result and shape first, then what you're recording and add a point, then the saved points and how-to. */
 :root {
@@ -89,7 +91,7 @@ h3 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap:
 .empty-msg { color: var(--muted); font-size: 1rem; margin: 0; }
 
 .shape { background: var(--surface-2); border-top: 1px solid var(--line); }
-.shape svg { display: block; width: 100%; height: auto; }
+#drawing > svg { display: block; width: 100%; height: auto; }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 4px 12px 10px; font-size: .85rem; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -166,8 +168,26 @@ details > summary { cursor: pointer; font-weight: 600; }
 details[open] > summary { margin-bottom: 10px; }
 details p { margin: 0 0 8px; }
 
+.view-tabs { display: flex; gap: 6px; padding: 10px 12px 0; }
+.vt { min-height: 34px; padding: 4px 14px; font-size: .88rem; }
+.vt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.map { height: 320px; margin: 10px 12px 0; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.map-cap, .map-note { margin: 6px 12px 0; font-size: .82rem; color: var(--muted); }
+/* Map pins sit on satellite photos, so they use fixed bright colours with a white ring in both themes. */
+.pin-wrap { background: none; border: none; }
+.pin {
+  display: grid; place-items: center; box-sizing: border-box;
+  height: 22px; min-width: 22px; padding: 0 5px; border-radius: 11px;
+  font: 700 12px/1 var(--font-display); border: 2px solid #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0,0,0,.6); white-space: nowrap;
+}
+.pin.farm { background: #FFC233; color: #1C1600; }
+.pin.plant { background: #2F9E4F; color: #FFFFFF; font: 700 10px/1 var(--font-body); }
+.pin.bore { background: #1D6FB8; color: #FFFFFF; font: 600 11px/1 var(--font-body); }
+
 @media (max-width: 360px) {
   .mode { padding: 8px; font-size: .86rem; }
+  .map { height: 280px; }
 }
 </style>
 
@@ -188,7 +208,17 @@ details p { margin: 0 0 8px; }
       <div id="rtc"></div>
       <div class="rtc-note" id="rtcNote"></div>
     </div>
-    <div class="shape" id="shape"></div>
+    <div class="shape">
+      <div class="view-tabs" role="group" aria-label="How to show the farm">
+        <button type="button" class="vt" id="view-map" aria-pressed="true">Satellite</button>
+        <button type="button" class="vt" id="view-draw" aria-pressed="false">Drawing</button>
+      </div>
+      <div id="map" class="map" hidden></div>
+      <p class="map-cap" id="mapCap" hidden>Satellite photos can be a few metres off and a few years old. Your GPS points are what the area is calculated from.</p>
+      <p class="map-note" id="mapNote" hidden></p>
+      <div id="drawing"></div>
+      <div class="legend" id="legend"></div>
+    </div>
     <div class="inside" id="inside"></div>
     <div class="units" id="units"></div>
     <div class="result-actions">
@@ -446,7 +476,7 @@ details p { margin: 0 0 8px; }
 
   // ---------- rendering ----------
   function renderShape(r) {
-    if (!r) { $("shape").innerHTML = ""; return; }
+    if (!r) { $("drawing").innerHTML = ""; $("legend").innerHTML = ""; return; }
     var W = 340, H = 240, pad = 34;
     var all = r.farmXY.concat(r.plantXY);
     if (r.boreXY) all.push(r.boreXY);
@@ -499,8 +529,95 @@ details p { margin: 0 0 8px; }
     if (F.length) lg.push('<span><i class="sw sw-farm"></i>Farm</span>');
     if (PL.length) lg.push('<span><i class="sw sw-plant"></i>Plantation</span>');
     if (B) lg.push('<span><i class="sw sw-bore"></i>Borewell</span>');
-    $("shape").innerHTML = svg + '<div class="legend">' + lg.join("") + '</div>';
+    $("drawing").innerHTML = svg;
+    $("legend").innerHTML = lg.join("");
   }
+
+  // ---------- satellite map (Leaflet + Esri World Imagery). Falls back to the drawing if it can't load. ----------
+  var VIEW_KEY = "farm-corner-calculator-view";
+  var view = "map";
+  try { var sv = localStorage.getItem(VIEW_KEY); if (sv === "map" || sv === "draw") view = sv; } catch (e) {}
+  var hasLeaflet = typeof window.L !== "undefined" && typeof window.L.map === "function";
+  var map = null, mapLayer = null, mapSig = "", mapFailed = false, tileOk = 0, tileErr = 0;
+
+  function failMap(msg) {
+    if (mapFailed) return;
+    mapFailed = true;
+    $("mapNote").textContent = msg; $("mapNote").hidden = false;
+    applyView();
+  }
+
+  function ensureMap() {
+    if (map || mapFailed || !hasLeaflet) return;
+    try {
+      map = L.map("map", { maxZoom: 21, zoomSnap: 0.5 });
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxNativeZoom: 18, maxZoom: 21,
+        attribution: "Imagery © Esri, Maxar, Earthstar Geographics"
+      }).on("tileload", function () { tileOk++; })
+        .on("tileerror", function () {
+          tileErr++;
+          if (!tileOk && tileErr >= 3) failMap("The satellite map couldn't load, so the drawing is shown. It needs internet, and it doesn't load inside the Claude app.");
+        }).addTo(map);
+      mapLayer = L.layerGroup().addTo(map);
+      map.setView([12.97, 77.59], 15);
+    } catch (e) {
+      map = null;
+      failMap("The satellite map couldn't start, so the drawing is shown.");
+    }
+  }
+
+  function applyView() {
+    var wantMap = view === "map" && hasLeaflet && !mapFailed;
+    if (view === "map" && !hasLeaflet && $("mapNote").hidden) {
+      $("mapNote").textContent = "The satellite map needs internet, so the drawing is shown.";
+      $("mapNote").hidden = false;
+    }
+    $("map").hidden = !wantMap;
+    if (wantMap) ensureMap();
+    var showMap = wantMap && !!map && !mapFailed;
+    $("map").hidden = !showMap;
+    $("mapCap").hidden = !showMap;
+    $("drawing").hidden = showMap;
+    $("view-map").setAttribute("aria-pressed", String(showMap));
+    $("view-draw").setAttribute("aria-pressed", String(!showMap));
+    $("view-map").disabled = !hasLeaflet || mapFailed;
+    if (showMap) { map.invalidateSize(); mapSig = ""; renderMap(); }
+  }
+
+  function renderMap() {
+    if (!map || $("map").hidden) return;
+    mapLayer.clearLayers();
+    var F = state.corners, PL = state.plantation, B = state.borewell;
+    if (F.length >= 3) L.polygon(F, { color: "#FFC233", weight: 3, fillColor: "#FFC233", fillOpacity: 0.15, interactive: false }).addTo(mapLayer);
+    else if (F.length === 2) L.polyline(F, { color: "#FFC233", weight: 3, dashArray: "6 6", interactive: false }).addTo(mapLayer);
+    if (PL.length >= 3) L.polygon(PL, { color: "#5CD67A", weight: 2.5, fillColor: "#5CD67A", fillOpacity: 0.25, interactive: false }).addTo(mapLayer);
+    else if (PL.length === 2) L.polyline(PL, { color: "#5CD67A", weight: 2.5, dashArray: "5 5", interactive: false }).addTo(mapLayer);
+    function pin(ll, text, cls, w) {
+      L.marker(ll, {
+        icon: L.divIcon({ className: "pin-wrap", html: '<span class="pin ' + cls + '">' + text + '</span>', iconSize: [w, 22], iconAnchor: [w / 2, 11] }),
+        interactive: false, keyboard: false
+      }).addTo(mapLayer);
+    }
+    PL.forEach(function (p, i) { pin(p, plabel(i), "plant", 26); });
+    F.forEach(function (p, i) { pin(p, letter(i), "farm", 22); });
+    if (B) pin(B, "Borewell", "bore", 66);
+    var all = F.concat(PL); if (B) all.push(B);
+    var sig = JSON.stringify(all);
+    if (sig !== mapSig) {
+      mapSig = sig;
+      if (all.length === 1) map.setView(all[0], 19);
+      else if (all.length > 1) map.fitBounds(L.latLngBounds(all), { padding: [36, 36], maxZoom: 20 });
+    }
+  }
+
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+    applyView();
+  }
+  $("view-map").addEventListener("click", function () { setView("map"); });
+  $("view-draw").addEventListener("click", function () { setView("draw"); });
 
   function insideRow(sw, title, value, detail) {
     return '<div class="inside-row"><span class="sw ' + sw + '"></span><div><div><span class="t">' + title + '</span>' +
@@ -628,6 +745,7 @@ details p { margin: 0 0 8px; }
       $("units").innerHTML = ""; $("units").hidden = true;
     }
     renderShape(r);
+    renderMap();
     renderInside(r);
     renderWarns(r);
 
@@ -808,6 +926,7 @@ details p { margin: 0 0 8px; }
     }, GPS_SECONDS * 1000);
   });
 
+  applyView();
   render();
 })();
 </script>

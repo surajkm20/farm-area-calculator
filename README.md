@@ -17,6 +17,10 @@ Choose **Plantation** at the top of *Add a point* and walk the plantation's corn
 
 Choose **Borewell**, stand next to it and add one point. It appears as a pin on the drawing, with its distance from the nearest side of the farm.
 
+### Satellite map
+
+The result card shows your farm boundary, plantation and borewell on a satellite photo (Esri World Imagery). Tap **Drawing** to switch to the plain drawing with side lengths. The satellite map needs internet; without it, or inside the Claude app, the page shows the drawing instead. Satellite photos can be a few metres off and a few years old, so the area is always calculated from your GPS points, not the photo.
+
 ## Units
 
 - 1 acre = 40 guntas = 43,560 sq ft
