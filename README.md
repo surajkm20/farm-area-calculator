@@ -19,7 +19,19 @@ Choose **Borewell**, stand next to it and add one point. It appears as a pin on 
 
 ### Satellite map
 
-The result card shows your farm boundary, plantation and borewell on a satellite photo (Esri World Imagery). Tap **Drawing** to switch to the plain drawing with side lengths. The satellite map needs internet; without it, or inside the Claude app, the page shows the drawing instead. Satellite photos can be a few metres off and a few years old, so the area is always calculated from your GPS points, not the photo.
+The result card shows your farm boundary, plantation and borewell on a satellite photo (Esri World Imagery). Tap **Site plan** to switch to a to-scale plan with a metre grid, side lengths, scale bar and north arrow. The satellite map needs internet; without it, or inside the Claude app, the page shows the site plan instead. Satellite photos can be a few metres off and a few years old, so the area is always calculated from your GPS points, not the photo.
+
+### Downloads for planning
+
+Under **Download for planning**:
+
+- **Site plan PDF**: A4 landscape, to scale, with areas, the borewell's distance to the boundary, a scale bar and the list of points. Print it or send it on WhatsApp.
+- **Site plan image**: the same plan as a PNG.
+- **CAD drawing (DXF)**: opens in AutoCAD and other CAD apps. Units are metres, corner A is at 0,0, X is east and Y is north. Layers: FARM_BOUNDARY, PLANTATION, BOREWELL, DIMENSIONS, NOTES.
+- **Google Earth (KML)**: farm boundary, plantation, borewell and corners.
+- **Coordinates (CSV)**: every point's latitude and longitude, plus metres east and north of corner A.
+
+Inside the Claude app only the PDF, image and CSV can be downloaded; use the GitHub Pages site for DXF and KML.
 
 ## Units
 

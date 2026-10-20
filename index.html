@@ -91,7 +91,8 @@ h3 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap:
 .empty-msg { color: var(--muted); font-size: 1rem; margin: 0; }
 
 .shape { background: var(--surface-2); border-top: 1px solid var(--line); }
-#drawing > svg { display: block; width: 100%; height: auto; }
+#drawing { padding: 10px 12px 12px; }
+#drawing canvas { display: block; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 4px 12px 10px; font-size: .85rem; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -113,6 +114,11 @@ h3 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap:
 .unit .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1rem; }
 .result-actions { padding: 12px 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
+.dl-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.dl { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px 12px; min-height: 62px; }
+.dl-t { font-weight: 600; font-size: .95rem; }
+.dl-d { font-weight: 400; font-size: .8rem; color: var(--muted); line-height: 1.3; }
+.dl.wide { grid-column: 1 / -1; }
 .warns { display: flex; flex-direction: column; gap: 8px; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 8px 12px; font-size: .92rem; margin: 0; }
 
@@ -211,7 +217,7 @@ details p { margin: 0 0 8px; }
     <div class="shape">
       <div class="view-tabs" role="group" aria-label="How to show the farm">
         <button type="button" class="vt" id="view-map" aria-pressed="true">Satellite</button>
-        <button type="button" class="vt" id="view-draw" aria-pressed="false">Drawing</button>
+        <button type="button" class="vt" id="view-draw" aria-pressed="false">Site plan</button>
       </div>
       <div id="map" class="map" hidden></div>
       <p class="map-cap" id="mapCap" hidden>Satellite photos can be a few metres off and a few years old. Your GPS points are what the area is calculated from.</p>
@@ -228,6 +234,20 @@ details p { margin: 0 0 8px; }
   </section>
 
   <div class="warns" id="warns"></div>
+
+  <section class="panel">
+    <h2>Download for planning</h2>
+    <p class="fine">For your polyhouse builder or engineer. North is at the top, and distances are in metres from corner A.</p>
+    <div class="dl-grid" id="dlGrid">
+      <button type="button" class="dl wide" data-fmt="pdf"><span class="dl-t">Site plan PDF</span><span class="dl-d">A4, to scale, with areas, scale bar and point list. Print it or send it on WhatsApp.</span></button>
+      <button type="button" class="dl" data-fmt="png"><span class="dl-t">Site plan image</span><span class="dl-d">Same plan as a PNG picture</span></button>
+      <button type="button" class="dl" data-fmt="dxf"><span class="dl-t">CAD drawing</span><span class="dl-d">DXF for AutoCAD, in metres</span></button>
+      <button type="button" class="dl" data-fmt="kml"><span class="dl-t">Google Earth</span><span class="dl-d">KML with all shapes</span></button>
+      <button type="button" class="dl" data-fmt="csv"><span class="dl-t">Coordinates</span><span class="dl-d">CSV of every point</span></button>
+    </div>
+    <p class="fine" id="exportHint">Add at least 3 farm corners to download the site plan and CAD drawing.</p>
+    <div class="msg" id="exportMsg"></div>
+  </section>
 
   <section class="panel">
     <h2>Add a point</h2>
@@ -380,10 +400,10 @@ details p { margin: 0 0 8px; }
     }
     return inside;
   }
-  function distToSeg(p, a, b) {
+  function closestOnSeg(p, a, b) {
     var dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
     var t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0;
-    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+    return [a[0] + t * dx, a[1] + t * dy];
   }
   function polyStats(xy) {
     var per = 0, sides = [];
@@ -409,12 +429,13 @@ details p { margin: 0 0 8px; }
     r.plant = r.plantXY.length >= 3 ? polyStats(r.plantXY) : null;
     if (r.farm && r.plantXY.length) r.plantOutside = r.plantXY.some(function (p) { return !pointInPoly(p, r.farmXY); });
     if (r.farm && r.boreXY) {
-      var best = Infinity, side = 0;
+      var best = Infinity, side = 0, near = null;
       for (var i = 0; i < r.farmXY.length; i++) {
-        var d = distToSeg(r.boreXY, r.farmXY[i], r.farmXY[(i + 1) % r.farmXY.length]);
-        if (d < best) { best = d; side = i; }
+        var q = closestOnSeg(r.boreXY, r.farmXY[i], r.farmXY[(i + 1) % r.farmXY.length]);
+        var d = dist(r.boreXY, q);
+        if (d < best) { best = d; side = i; near = q; }
       }
-      r.bore = { inside: pointInPoly(r.boreXY, r.farmXY), d: best, side: side };
+      r.bore = { inside: pointInPoly(r.boreXY, r.farmXY), d: best, side: side, near: near };
     }
     return r;
   }
@@ -475,63 +496,454 @@ details p { margin: 0 0 8px; }
   }
 
   // ---------- rendering ----------
-  function renderShape(r) {
-    if (!r) { $("drawing").innerHTML = ""; $("legend").innerHTML = ""; return; }
-    var W = 340, H = 240, pad = 34;
-    var all = r.farmXY.concat(r.plantXY);
-    if (r.boreXY) all.push(r.boreXY);
+  // ---------- site plan (to scale, north up, metres from corner A) ----------
+  // Drawn on white "paper" in both themes, because it is the same drawing that gets printed and exported.
+  var PAPER = {
+    bg: "#FFFFFF", ink: "#1C2920", muted: "#5B6B5F", grid: "#E6EBE3", gridMajor: "#C8D2C4", frame: "#9AA79C",
+    farm: "#B7791F", farmFill: "rgba(212,155,18,0.13)", farmDot: "#E0A400",
+    crop: "#2F7D3E", cropFill: "rgba(63,138,78,0.20)", water: "#1D6FB8"
+  };
+  var FONT = '"Hind", "Segoe UI", Roboto, Arial, sans-serif';
+  var DISPLAY = '"Zilla Slab", Georgia, "Times New Roman", serif';
+  var MONO = '"IBM Plex Mono", Menlo, Consolas, monospace';
+
+  function niceStep(target) {
+    var c = [0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000];
+    for (var i = 0; i < c.length; i++) if (c[i] >= target) return c[i];
+    return 5000;
+  }
+  function m1(v) { return fmt(v, v < 100 ? 1 : 0); }
+
+  // Points in metres with corner A (or the first point) at 0,0; x east, y north.
+  function planData() {
+    var r = compute();
+    if (!r) return null;
+    var o = r.farmXY[0] || r.plantXY[0] || r.boreXY;
+    function O(p) { return [p[0] - o[0], p[1] - o[1]]; }
+    var originLL = state.corners[0] || state.plantation[0] || state.borewell;
+    var originName = state.corners.length ? "corner A" : state.plantation.length ? "plantation corner P1" : "the borewell";
+    return {
+      r: r, F: r.farmXY.map(O), PL: r.plantXY.map(O), B: r.boreXY ? O(r.boreXY) : null,
+      near: r.bore ? O(r.bore.near) : null, originLL: originLL, originName: originName
+    };
+  }
+
+  function centroid(P) { var x = 0, y = 0; P.forEach(function (p) { x += p[0]; y += p[1]; }); return [x / P.length, y / P.length]; }
+
+  function drawPlan(ctx, X, Y, W, H, k, d) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(X, Y, W, H); ctx.clip();
+    ctx.fillStyle = PAPER.bg; ctx.fillRect(X, Y, W, H);
+    var all = d.F.concat(d.PL); if (d.B) all.push(d.B);
     var xs = all.map(function (p) { return p[0]; }), ys = all.map(function (p) { return p[1]; });
-    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
-    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
-    var spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    var pad = 58 * k;
+    var spanX = Math.max(maxX - minX, 10), spanY = Math.max(maxY - minY, 10);
     var s = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
-    if (all.length === 1) s = 1;
-    var ox = (W - spanX * s) / 2, oy = (H - spanY * s) / 2;
-    function S(p) { return [ox + (p[0] - minX) * s, H - (oy + (p[1] - minY) * s)]; }
-    function ptsAttr(A) { return A.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" "); }
-    var F = r.farmXY.map(S), PL = r.plantXY.map(S), B = r.boreXY ? S(r.boreXY) : null;
-
-    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Drawing of the farm, plantation and borewell">';
-    if (F.length >= 3) svg += '<polygon points="' + ptsAttr(F) + '" fill="var(--plot-fill)" stroke="var(--plot)" stroke-width="2.5" stroke-linejoin="round"/>';
-    else if (F.length === 2) svg += '<polyline points="' + ptsAttr(F) + '" fill="none" stroke="var(--plot)" stroke-width="2.5" stroke-dasharray="6 5"/>';
-    if (PL.length >= 3) svg += '<polygon points="' + ptsAttr(PL) + '" fill="var(--crop-fill)" stroke="var(--crop)" stroke-width="2" stroke-linejoin="round"/>';
-    else if (PL.length === 2) svg += '<polyline points="' + ptsAttr(PL) + '" fill="none" stroke="var(--crop)" stroke-width="2" stroke-dasharray="5 4"/>';
-
-    // farm side lengths
-    if (r.farm) {
-      var cx = 0, cy = 0; F.forEach(function (p) { cx += p[0]; cy += p[1]; }); cx /= F.length; cy /= F.length;
-      for (var i = 0; i < F.length; i++) {
-        var a = F[i], b = F[(i + 1) % F.length];
-        var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-        var dx = mx - cx, dy = my - cy, dl = Math.hypot(dx, dy) || 1;
-        svg += '<text x="' + (mx + dx / dl * 14).toFixed(1) + '" y="' + (my + dy / dl * 14 + 4).toFixed(1) + '" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">' + Math.round(r.farm.sides[i]) + ' m</text>';
+    var cx = X + W / 2 - (minX + maxX) / 2 * s, cy = Y + H / 2 + (minY + maxY) / 2 * s;
+    function T(p) { return [cx + p[0] * s, cy - p[1] * s]; }
+    function seg(a, b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    function label(t, x, y, size, color, weight, family) {
+      ctx.font = (weight || 600) + " " + size + "px " + (family || FONT);
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.lineWidth = 4 * k; ctx.strokeStyle = "rgba(255,255,255,0.94)"; ctx.strokeText(t, x, y);
+      ctx.fillStyle = color; ctx.fillText(t, x, y);
+    }
+    function shape(P, stroke, fill, width) {
+      ctx.beginPath(); P.forEach(function (p, i) { var q = T(p); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+      if (P.length >= 3) { ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+      ctx.lineWidth = width * k; ctx.strokeStyle = stroke; ctx.lineJoin = "round"; ctx.setLineDash(P.length >= 3 ? [] : [6 * k, 5 * k]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    function sideLabels(P, stats, outward, size, color) {
+      var c = T(centroid(P));
+      for (var i = 0; i < P.length; i++) {
+        var a = T(P[i]), b = T(P[(i + 1) % P.length]);
+        var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, dx = mx - c[0], dy = my - c[1], dl = Math.hypot(dx, dy) || 1;
+        var off = (outward ? 1 : -1) * 15 * k;
+        label(m1(stats.sides[i]) + " m", mx + dx / dl * off, my + dy / dl * off, size * k, color, 600);
       }
     }
-    PL.forEach(function (p, i) {
-      svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="7.5" fill="var(--crop)" stroke="var(--surface)" stroke-width="1.5"/>';
-      svg += '<text x="' + p[0].toFixed(1) + '" y="' + (p[1] + 3).toFixed(1) + '" text-anchor="middle" font-size="8" font-weight="700" font-family="Hind, sans-serif" fill="var(--surface)">' + plabel(i) + '</text>';
-    });
-    F.forEach(function (p, i) {
-      svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="9" fill="var(--plot)" stroke="var(--surface)" stroke-width="2"/>';
-      svg += '<text x="' + p[0].toFixed(1) + '" y="' + (p[1] + 4).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="700" font-family="Zilla Slab, Georgia, serif" fill="#1C1600">' + letter(i) + '</text>';
-    });
-    if (B) {
-      svg += '<circle cx="' + B[0].toFixed(1) + '" cy="' + B[1].toFixed(1) + '" r="10" fill="none" stroke="var(--water)" stroke-width="2"/>';
-      svg += '<circle cx="' + B[0].toFixed(1) + '" cy="' + B[1].toFixed(1) + '" r="5" fill="var(--water)"/>';
-      var below = B[1] < H - 34;
-      var lx = Math.max(28, Math.min(W - 28, B[0]));
-      svg += '<text x="' + lx.toFixed(1) + '" y="' + (below ? B[1] + 24 : B[1] - 15).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="600" font-family="Hind, sans-serif" fill="var(--water)">Borewell</text>';
-    }
-    svg += '<g transform="translate(' + (W - 22) + ',22)"><path d="M0,-12 L6,4 L0,0 L-6,4 Z" fill="var(--ink)"/><text y="16" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)" font-family="Hind, sans-serif">N</text></g>';
-    svg += '</svg>';
 
+    // Grid, aligned to the origin so each line is a whole number of metres from corner A.
+    var step = niceStep(46 * k / s);
+    ctx.lineWidth = 1 * k;
+    var i0 = Math.ceil((X - cx) / s / step), i1 = Math.floor((X + W - cx) / s / step);
+    for (var i = i0; i <= i1; i++) { var px = cx + i * step * s; ctx.strokeStyle = i % 5 === 0 ? PAPER.gridMajor : PAPER.grid; seg([px, Y], [px, Y + H]); }
+    var j0 = Math.ceil((cy - (Y + H)) / s / step), j1 = Math.floor((cy - Y) / s / step);
+    for (var j = j0; j <= j1; j++) { var py = cy - j * step * s; ctx.strokeStyle = j % 5 === 0 ? PAPER.gridMajor : PAPER.grid; seg([X, py], [X + W, py]); }
+
+    // Shapes
+    if (d.F.length >= 2) shape(d.F, PAPER.farm, PAPER.farmFill, 2.6);
+    if (d.PL.length >= 2) shape(d.PL, PAPER.crop, PAPER.cropFill, 2);
+    if (d.r.farm) sideLabels(d.F, d.r.farm, true, 12, PAPER.farm);
+    if (d.r.plant) {
+      sideLabels(d.PL, d.r.plant, false, 10.5, PAPER.crop);
+      var pc = T(centroid(d.PL));
+      label("Plantation", pc[0], pc[1] - 8 * k, 12 * k, PAPER.crop, 700);
+      var pp = rtcParts(d.r.plant.a);
+      label((pp[0] ? pp[0] + " acres " : "") + pp[1] + " guntas " + pp[2] + " aane", pc[0], pc[1] + 8 * k, 10 * k, PAPER.crop, 500);
+    }
+
+    // Borewell, with its distance to the nearest boundary side
+    if (d.B) {
+      var b = T(d.B);
+      if (d.near) {
+        var nb = T(d.near);
+        ctx.strokeStyle = PAPER.water; ctx.lineWidth = 1.5 * k; ctx.setLineDash([5 * k, 4 * k]); seg(b, nb); ctx.setLineDash([]);
+        label(m1(d.r.bore.d) + " m", (b[0] + nb[0]) / 2, (b[1] + nb[1]) / 2 - 9 * k, 11 * k, PAPER.water, 700);
+      }
+      ctx.beginPath(); ctx.arc(b[0], b[1], 9 * k, 0, Math.PI * 2); ctx.lineWidth = 2 * k; ctx.strokeStyle = PAPER.water; ctx.stroke();
+      ctx.beginPath(); ctx.arc(b[0], b[1], 4.5 * k, 0, Math.PI * 2); ctx.fillStyle = PAPER.water; ctx.fill();
+      label("Borewell", b[0], b[1] + 21 * k, 11.5 * k, PAPER.water, 700);
+    }
+
+    // Corner markers on top
+    d.PL.forEach(function (p, i) {
+      var q = T(p);
+      ctx.beginPath(); ctx.arc(q[0], q[1], 8.5 * k, 0, Math.PI * 2); ctx.fillStyle = PAPER.crop; ctx.fill();
+      ctx.lineWidth = 1.5 * k; ctx.strokeStyle = "#FFFFFF"; ctx.stroke();
+      ctx.font = "700 " + 8.5 * k + "px " + FONT; ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(plabel(i), q[0], q[1] + 0.5 * k);
+    });
+    d.F.forEach(function (p, i) {
+      var q = T(p);
+      ctx.beginPath(); ctx.arc(q[0], q[1], 10 * k, 0, Math.PI * 2); ctx.fillStyle = PAPER.farmDot; ctx.fill();
+      ctx.lineWidth = 2 * k; ctx.strokeStyle = "#FFFFFF"; ctx.stroke();
+      ctx.font = "700 " + 12 * k + "px " + DISPLAY; ctx.fillStyle = "#1C1600"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(letter(i), q[0], q[1] + 0.5 * k);
+    });
+
+    // North arrow
+    var nx = X + W - 26 * k, ny = Y + 26 * k;
+    ctx.beginPath(); ctx.moveTo(nx, ny - 14 * k); ctx.lineTo(nx + 7 * k, ny + 6 * k); ctx.lineTo(nx, ny + 1 * k); ctx.lineTo(nx - 7 * k, ny + 6 * k); ctx.closePath();
+    ctx.fillStyle = PAPER.ink; ctx.fill();
+    label("N", nx, ny + 17 * k, 12 * k, PAPER.ink, 700);
+
+    // Scale bar
+    var L = niceStep(W * 0.2 / s), bw = L * s, bx = X + 16 * k, by = Y + H - 20 * k, bh = 6 * k;
+    for (var q = 0; q < 4; q++) { ctx.fillStyle = q % 2 ? "#FFFFFF" : PAPER.ink; ctx.fillRect(bx + q * bw / 4, by, bw / 4, bh); }
+    ctx.lineWidth = 1 * k; ctx.strokeStyle = PAPER.ink; ctx.strokeRect(bx, by, bw, bh);
+    ctx.font = "600 " + 10.5 * k + "px " + FONT; ctx.fillStyle = PAPER.ink; ctx.textBaseline = "bottom";
+    ctx.textAlign = "left"; ctx.fillText("0", bx, by - 3 * k);
+    ctx.textAlign = "right"; ctx.fillText(fmt(L, L < 1 ? 1 : 0) + " m", bx + bw, by - 3 * k);
+
+    // Grid caption
+    ctx.font = "500 " + 10 * k + "px " + FONT; ctx.fillStyle = PAPER.muted; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText("Grid " + fmt(step, step < 1 ? 1 : 0) + " m, from " + d.originName, X + W - 10 * k, Y + H - 8 * k);
+
+    ctx.restore();
+    return { s: s, step: step };
+  }
+
+  // Right-hand panel of the exported A4 sheet
+  function drawPanel(ctx, X, Y, W, H, d, res) {
+    var r = d.r, y = Y;
+    function text(s, size, color, weight, family, after) {
+      ctx.font = (weight || 400) + " " + size + "px " + (family || FONT);
+      ctx.fillStyle = color || PAPER.ink; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      var words = String(s).split(" "), line = "";
+      words.forEach(function (w) {
+        var test = line ? line + " " + w : w;
+        if (ctx.measureText(test).width > W && line) { ctx.fillText(line, X, y); y += size * 1.32; line = w; } else line = test;
+      });
+      if (line) { ctx.fillText(line, X, y); y += size * 1.32; }
+      y += after || 0;
+    }
+    function heading(s, color, swatchRound) {
+      if (color) {
+        ctx.fillStyle = color;
+        if (swatchRound) { ctx.beginPath(); ctx.arc(X + 11, y + 13, 10, 0, Math.PI * 2); ctx.fill(); }
+        else ctx.fillRect(X, y + 3, 22, 22);
+      }
+      ctx.font = "700 27px " + FONT; ctx.fillStyle = PAPER.ink; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText(s, X + (color ? 34 : 0), y); y += 38;
+    }
+    text("Farm site plan", 58, PAPER.ink, 700, DISPLAY, 2);
+    text(new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) + (state.example ? " · Example farm" : ""), 24, PAPER.muted, 400, FONT, 34);
+
+    if (r.farm) {
+      heading("Farm", PAPER.farmDot);
+      text(rtcText(r.farm.a), 30, PAPER.ink, 700, FONT, 2);
+      text(fmt(r.farm.a / ACRE_M2, 3) + " acres · " + fmt(r.farm.a, 0) + " m² · " + fmt(r.farm.a / SQFT_M2, 0) + " sq ft", 22, PAPER.muted, 400, FONT, 2);
+      text("Boundary " + fmt(r.farm.per, 0) + " m, " + state.corners.length + " corners", 22, PAPER.muted, 400, FONT, 24);
+    }
+    if (r.plant) {
+      heading("Plantation", PAPER.crop);
+      text(rtcText(r.plant.a), 30, PAPER.ink, 700, FONT, 2);
+      text(fmt(r.plant.a / ACRE_M2, 3) + " acres · " + fmt(r.plant.a, 0) + " m²" + (r.farm ? " · " + fmt(r.plant.a / r.farm.a * 100, 0) + "% of farm" : ""), 22, PAPER.muted, 400, FONT, 24);
+      if (r.farm) {
+        heading("Open land");
+        var open = Math.max(0, r.farm.a - r.plant.a);
+        text(rtcText(open), 30, PAPER.ink, 700, FONT, 2);
+        text(fmt(open / ACRE_M2, 3) + " acres · " + fmt(open, 0) + " m²", 22, PAPER.muted, 400, FONT, 24);
+      }
+    }
+    if (state.borewell) {
+      heading("Borewell", PAPER.water, true);
+      if (r.bore) text((r.bore.inside ? "Inside the farm, " : "Outside the farm, ") + m1(r.bore.d) + " m from side " + sideName(r.bore.side), 24, PAPER.ink, 600, FONT, 2);
+      text(coordStr(state.borewell), 22, PAPER.muted, 400, MONO, 24);
+    }
+
+    // Corner coordinates, as many as fit above the notes
+    var notesTop = Y + H - 196;
+    var rows = [];
+    state.corners.forEach(function (c, i) { rows.push([letter(i), c]); });
+    state.plantation.forEach(function (c, i) { rows.push([plabel(i), c]); });
+    if (rows.length && y + 80 < notesTop) {
+      heading("Points (latitude, longitude)");
+      var shown = 0;
+      for (var i = 0; i < rows.length; i++) {
+        if (y + 30 > notesTop - (i < rows.length - 1 ? 30 : 0)) break;
+        ctx.font = "700 21px " + FONT; ctx.fillStyle = PAPER.ink; ctx.textBaseline = "top"; ctx.fillText(rows[i][0], X, y);
+        ctx.font = "400 21px " + MONO; ctx.fillStyle = PAPER.muted; ctx.fillText(coordStr(rows[i][1]), X + 52, y);
+        y += 29; shown++;
+      }
+      if (shown < rows.length) text("…and " + (rows.length - shown) + " more in the CSV download", 20, PAPER.muted, 400, FONT, 0);
+    }
+
+    // Notes pinned to the bottom
+    y = notesTop;
+    ctx.fillStyle = PAPER.gridMajor; ctx.fillRect(X, y - 16, W, 2);
+    var scale = 1000 / (res.s * (297 / 2339));
+    scale = scale >= 1000 ? Math.round(scale / 50) * 50 : Math.round(scale / 10) * 10;
+    text("Scale about 1:" + fmt(scale, 0) + " when printed on A4 landscape at 100%.", 21, PAPER.ink, 600, FONT, 6);
+    text("North is up. Grid lines are measured in metres from " + d.originName + " (" + coordStr(d.originLL) + ").", 21, PAPER.muted, 400, FONT, 6);
+    text("Measured with phone GPS, about ±3–5 m per point. For planning only, not a legal survey.", 21, PAPER.muted, 400, FONT, 0);
+  }
+
+  function renderPlan() {
+    var wrap = $("drawing");
+    if (wrap.hidden) return;
+    var d = planData();
+    if (!d) { wrap.innerHTML = ""; return; }
+    var c = $("planCanvas");
+    if (!c) {
+      wrap.innerHTML = '<canvas id="planCanvas" role="img" aria-label="Site plan of the farm, drawn to scale with north up"></canvas>';
+      c = $("planCanvas");
+    }
+    var w = Math.max(260, wrap.clientWidth - 24), h = Math.round(w * 0.8);
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    c.style.width = w + "px"; c.style.height = h + "px";
+    var ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawPlan(ctx, 0, 0, w, h, 1, d);
+  }
+
+  function renderLegend() {
     var lg = [];
-    if (F.length) lg.push('<span><i class="sw sw-farm"></i>Farm</span>');
-    if (PL.length) lg.push('<span><i class="sw sw-plant"></i>Plantation</span>');
-    if (B) lg.push('<span><i class="sw sw-bore"></i>Borewell</span>');
-    $("drawing").innerHTML = svg;
+    if (state.corners.length) lg.push('<span><i class="sw sw-farm"></i>Farm</span>');
+    if (state.plantation.length) lg.push('<span><i class="sw sw-plant"></i>Plantation</span>');
+    if (state.borewell) lg.push('<span><i class="sw sw-bore"></i>Borewell</span>');
     $("legend").innerHTML = lg.join("");
   }
+
+  var resizeTimer = null;
+  window.addEventListener("resize", function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPlan, 150); });
+
+  // ---------- downloads ----------
+  function stamp() {
+    var t = new Date();
+    return t.getFullYear() + "-" + String(t.getMonth() + 1).padStart(2, "0") + "-" + String(t.getDate()).padStart(2, "0");
+  }
+
+  function exportCanvas() {
+    var d = planData();
+    var c = document.createElement("canvas");
+    c.width = 2339; c.height = 1654; // A4 landscape at 200 dpi
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, c.width, c.height);
+    var res = drawPlan(ctx, 48, 48, 1592, 1558, 2.2, d);
+    ctx.strokeStyle = PAPER.frame; ctx.lineWidth = 2; ctx.strokeRect(48, 48, 1592, 1558);
+    drawPanel(ctx, 1690, 60, 600, 1534, d, res);
+    return c;
+  }
+
+  function canvasBlob(c, type, q) {
+    return new Promise(function (resolve, reject) {
+      c.toBlob(function (b) { if (b) resolve(b); else reject(new Error("toBlob failed")); }, type, q);
+    });
+  }
+
+  // One-page A4 landscape PDF holding the plan as a JPEG image.
+  function makePdf(jpg, iw, ih) {
+    function enc(s) { var a = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i) & 255; return a; }
+    var pw = 842, ph = 595, parts = [], offsets = [], len = 0;
+    function push(u8) { parts.push(u8); len += u8.length; }
+    function obj(n, head, stream) {
+      offsets[n] = len;
+      if (stream) { push(enc(n + " 0 obj\n" + head + "\nstream\n")); push(stream); push(enc("\nendstream\nendobj\n")); }
+      else push(enc(n + " 0 obj\n" + head + "\nendobj\n"));
+    }
+    var content = "q " + pw + " 0 0 " + ph + " 0 0 cm /Im0 Do Q";
+    push(enc("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
+    obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    obj(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + pw + " " + ph + "] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>");
+    obj(4, "<< /Type /XObject /Subtype /Image /Width " + iw + " /Height " + ih + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpg.length + " >>", jpg);
+    obj(5, "<< /Length " + content.length + " >>", enc(content));
+    obj(6, "<< /Title (Farm site plan) /Producer (Farm Corner Calculator) >>");
+    var xref = len, x = "xref\n0 7\n0000000000 65535 f \n";
+    for (var i = 1; i <= 6; i++) x += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+    x += "trailer\n<< /Size 7 /Root 1 0 R /Info 6 0 R >>\nstartxref\n" + xref + "\n%%EOF\n";
+    push(enc(x));
+    return new Blob(parts, { type: "application/pdf" });
+  }
+
+  // AutoCAD R12 DXF in metres, origin at corner A, X east, Y north.
+  function makeDxf() {
+    var d = planData(), r = d.r, out = [];
+    function g(code, v) { out.push(String(code), String(v)); }
+    function n(v) { return (Math.round(v * 1000) / 1000).toFixed(3); }
+    function ascii(s) { return String(s).replace(/[–—]/g, "-").replace(/±/g, "+/-").replace(/²/g, "2").replace(/[^\x20-\x7E]/g, ""); }
+    var all = d.F.concat(d.PL); if (d.B) all.push(d.B);
+    var xs = all.map(function (p) { return p[0]; }), ys = all.map(function (p) { return p[1]; });
+    var minX = Math.min.apply(null, xs), minY = Math.min.apply(null, ys);
+    var span = Math.max(Math.max.apply(null, xs) - minX, Math.max.apply(null, ys) - minY, 10);
+    var th = Math.max(0.3, Math.round(span / 70 * 10) / 10);
+    function text(x, y, h, s, layer, color) { g(0, "TEXT"); g(8, layer); g(62, color); g(10, n(x)); g(20, n(y)); g(30, "0.0"); g(40, n(h)); g(1, ascii(s)); }
+    function poly(P, layer, color, closed) {
+      g(0, "POLYLINE"); g(8, layer); g(62, color); g(66, 1); g(10, "0.0"); g(20, "0.0"); g(30, "0.0"); g(70, closed ? 1 : 0);
+      P.forEach(function (p) { g(0, "VERTEX"); g(8, layer); g(10, n(p[0])); g(20, n(p[1])); g(30, "0.0"); });
+      g(0, "SEQEND"); g(8, layer);
+    }
+    function line(a, b, layer, color) { g(0, "LINE"); g(8, layer); g(62, color); g(10, n(a[0])); g(20, n(a[1])); g(30, "0.0"); g(11, n(b[0])); g(21, n(b[1])); g(31, "0.0"); }
+    function circle(p, rad, layer, color) { g(0, "CIRCLE"); g(8, layer); g(62, color); g(10, n(p[0])); g(20, n(p[1])); g(30, "0.0"); g(40, n(rad)); }
+
+    g(0, "SECTION"); g(2, "HEADER"); g(9, "$ACADVER"); g(1, "AC1009"); g(9, "$INSUNITS"); g(70, 6); g(0, "ENDSEC");
+    g(0, "SECTION"); g(2, "ENTITIES");
+    if (d.F.length >= 2) {
+      poly(d.F, "FARM_BOUNDARY", 30, d.F.length >= 3);
+      d.F.forEach(function (p, i) { text(p[0] + th * 0.3, p[1] + th * 0.3, th, letter(i), "FARM_BOUNDARY", 30); });
+      if (r.farm) r.farm.sides.forEach(function (L, i) {
+        var a = d.F[i], b = d.F[(i + 1) % d.F.length];
+        text((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, th * 0.7, m1(L) + " m", "DIMENSIONS", 8);
+      });
+    }
+    if (d.PL.length >= 2) {
+      poly(d.PL, "PLANTATION", 3, d.PL.length >= 3);
+      d.PL.forEach(function (p, i) { text(p[0] + th * 0.3, p[1] + th * 0.3, th * 0.8, plabel(i), "PLANTATION", 3); });
+      if (r.plant) {
+        r.plant.sides.forEach(function (L, i) {
+          var a = d.PL[i], b = d.PL[(i + 1) % d.PL.length];
+          text((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, th * 0.6, m1(L) + " m", "DIMENSIONS", 8);
+        });
+        var pc = centroid(d.PL);
+        text(pc[0] - th * 3, pc[1], th, "PLANTATION", "PLANTATION", 3);
+      }
+    }
+    if (d.B) {
+      circle(d.B, Math.max(0.5, th * 0.5), "BOREWELL", 5);
+      text(d.B[0] + th * 0.8, d.B[1] - th * 0.4, th * 0.9, "BOREWELL", "BOREWELL", 5);
+      if (d.near) {
+        line(d.B, d.near, "BOREWELL", 5);
+        text((d.B[0] + d.near[0]) / 2, (d.B[1] + d.near[1]) / 2 + th * 0.3, th * 0.7, m1(r.bore.d) + " m", "DIMENSIONS", 5);
+      }
+    }
+    var notes = ["FARM SITE PLAN - " + stamp()];
+    if (r.farm) notes.push("Farm: " + rtcText(r.farm.a) + " (" + fmt(r.farm.a / ACRE_M2, 3) + " acres, " + fmt(r.farm.a, 0) + " sq m), boundary " + fmt(r.farm.per, 0) + " m");
+    if (r.plant) notes.push("Plantation: " + rtcText(r.plant.a) + " (" + fmt(r.plant.a, 0) + " sq m)");
+    if (r.plant && r.farm) notes.push("Open land: " + rtcText(Math.max(0, r.farm.a - r.plant.a)));
+    if (r.bore) notes.push("Borewell: " + (r.bore.inside ? "inside" : "outside") + " the farm, " + m1(r.bore.d) + " m from side " + sideName(r.bore.side));
+    notes.push("Origin (0,0) = " + d.originName + " at " + coordStr(d.originLL) + ". X = east, Y = north. Units: metres.");
+    notes.push("Measured with phone GPS, about +/-3-5 m per point. For planning only, not a legal survey.");
+    notes.forEach(function (s, i) { text(minX, minY - th * 3 - i * th * 1.7, th * (i ? 0.8 : 1.1), s, "NOTES", 7); });
+    g(0, "ENDSEC"); g(0, "EOF");
+    return out.join("\r\n") + "\r\n";
+  }
+
+  function makeKml() {
+    var r = compute();
+    function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function ll(p) { return p[1].toFixed(7) + "," + p[0].toFixed(7) + ",0"; }
+    function ring(P) { return P.concat([P[0]]).map(ll).join(" "); }
+    function area(P, name, style, desc) {
+      if (P.length >= 3) return '<Placemark><name>' + esc(name) + '</name><description>' + esc(desc) + '</description><styleUrl>#' + style + '</styleUrl><Polygon><tessellate>1</tessellate><outerBoundaryIs><LinearRing><coordinates>' + ring(P) + '</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>';
+      if (P.length === 2) return '<Placemark><name>' + esc(name) + '</name><styleUrl>#' + style + '</styleUrl><LineString><tessellate>1</tessellate><coordinates>' + P.map(ll).join(" ") + '</coordinates></LineString></Placemark>';
+      return "";
+    }
+    function point(p, name, style, desc) { return '<Placemark><name>' + esc(name) + '</name>' + (desc ? '<description>' + esc(desc) + '</description>' : '') + '<styleUrl>#' + style + '</styleUrl><Point><coordinates>' + ll(p) + '</coordinates></Point></Placemark>'; }
+    var k = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+      '<name>Farm site plan ' + stamp() + '</name>',
+      '<Style id="farm"><LineStyle><color>ff33c2ff</color><width>3</width></LineStyle><PolyStyle><color>3333c2ff</color></PolyStyle></Style>',
+      '<Style id="plant"><LineStyle><color>ff7ad65c</color><width>2</width></LineStyle><PolyStyle><color>557ad65c</color></PolyStyle></Style>',
+      '<Style id="bore"><IconStyle><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/blu-circle.png</href></Icon></IconStyle></Style>',
+      '<Style id="corner"><IconStyle><scale>0.7</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/ylw-blank.png</href></Icon></IconStyle></Style>',
+      '<Style id="pcorner"><IconStyle><scale>0.6</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/grn-blank.png</href></Icon></IconStyle></Style>'
+    ];
+    k.push(area(state.corners, "Farm boundary", "farm", r && r.farm ? rtcText(r.farm.a) + ", " + fmt(r.farm.a / ACRE_M2, 3) + " acres, boundary " + fmt(r.farm.per, 0) + " m" : ""));
+    k.push(area(state.plantation, "Plantation", "plant", r && r.plant ? rtcText(r.plant.a) + ", " + fmt(r.plant.a / ACRE_M2, 3) + " acres" : ""));
+    if (state.borewell) k.push(point(state.borewell, "Borewell", "bore", r && r.bore ? (r.bore.inside ? "Inside" : "Outside") + " the farm, " + m1(r.bore.d) + " m from side " + sideName(r.bore.side) : ""));
+    if (state.corners.length || state.plantation.length) {
+      k.push('<Folder><name>Corners</name>');
+      state.corners.forEach(function (c, i) { k.push(point(c, letter(i), "corner")); });
+      state.plantation.forEach(function (c, i) { k.push(point(c, plabel(i), "pcorner")); });
+      k.push('</Folder>');
+    }
+    k.push('</Document></kml>');
+    return k.join("\n");
+  }
+
+  function makeCsv() {
+    var d = planData();
+    var rows = [["feature", "label", "latitude", "longitude", "east_m", "north_m"]];
+    function add(feature, label, ll, xy) { rows.push([feature, label, ll[0].toFixed(7), ll[1].toFixed(7), xy[0].toFixed(2), xy[1].toFixed(2)]); }
+    state.corners.forEach(function (c, i) { add("farm boundary", letter(i), c, d.F[i]); });
+    state.plantation.forEach(function (c, i) { add("plantation", plabel(i), c, d.PL[i]); });
+    if (state.borewell) add("borewell", "BW", state.borewell, d.B);
+    return rows.map(function (r) { return r.join(","); }).join("\r\n") + "\r\n";
+  }
+
+  function saveFile(name, blob) {
+    if (framed && window.claude && typeof window.claude.use === "function") {
+      var ext = name.split(".").pop();
+      if (["pdf", "png", "csv"].indexOf(ext) < 0) {
+        setMsg("exportMsg", "This file type can't be downloaded inside the Claude app. Open " + SITE + " in Chrome to download it.", "err");
+        return Promise.resolve();
+      }
+      return window.claude.use("downloads").then(function (dl) {
+        if (!dl) { setMsg("exportMsg", "Downloads aren't available here. Open " + SITE + " in Chrome to download.", "err"); return; }
+        return dl.save({ filename: name, data: blob }).then(function () { setMsg("exportMsg", "Saved " + name + ".", "ok"); },
+          function (e) { setMsg("exportMsg", e && e.code === "declined" ? "Download cancelled." : "Couldn't save the file here. Open " + SITE + " in Chrome to download it.", e && e.code === "declined" ? "" : "err"); });
+      });
+    }
+    var url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    setMsg("exportMsg", "Downloaded " + name + ". Check your Downloads folder.", "ok");
+    return Promise.resolve();
+  }
+
+  function renderExports(r) {
+    var hasFarm = !!(r && r.farm), any = !!r;
+    document.querySelectorAll("#dlGrid .dl").forEach(function (b) {
+      var f = b.getAttribute("data-fmt");
+      b.disabled = (f === "kml" || f === "csv") ? !any : !hasFarm;
+    });
+    $("exportHint").hidden = hasFarm;
+  }
+
+  $("dlGrid").addEventListener("click", function (e) {
+    var b = e.target.closest("button.dl");
+    if (!b || b.disabled) return;
+    var fmtName = b.getAttribute("data-fmt");
+    var base = (state.example ? "example-" : "") + "farm-" + stamp();
+    setMsg("exportMsg", "Preparing the file…");
+    var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready.catch(function () {}) : Promise.resolve();
+    fontsReady.then(function () {
+      if (fmtName === "png") return canvasBlob(exportCanvas(), "image/png").then(function (bl) { return saveFile(base + "-site-plan.png", bl); });
+      if (fmtName === "pdf") {
+        var c = exportCanvas();
+        return canvasBlob(c, "image/jpeg", 0.92).then(function (jb) { return jb.arrayBuffer(); })
+          .then(function (buf) { return saveFile(base + "-site-plan.pdf", makePdf(new Uint8Array(buf), c.width, c.height)); });
+      }
+      if (fmtName === "dxf") return saveFile(base + "-site-plan.dxf", new Blob([makeDxf()], { type: "application/dxf" }));
+      if (fmtName === "kml") return saveFile(base + ".kml", new Blob([makeKml()], { type: "application/vnd.google-earth.kml+xml" }));
+      if (fmtName === "csv") return saveFile(base + "-points.csv", new Blob([makeCsv()], { type: "text/csv" }));
+    }).catch(function () { setMsg("exportMsg", "Couldn't make the file. Try again.", "err"); });
+  });
 
   // ---------- satellite map (Leaflet + Esri World Imagery). Falls back to the drawing if it can't load. ----------
   var VIEW_KEY = "farm-corner-calculator-view";
@@ -557,20 +969,20 @@ details p { margin: 0 0 8px; }
       }).on("tileload", function () { tileOk++; })
         .on("tileerror", function () {
           tileErr++;
-          if (!tileOk && tileErr >= 3) failMap("The satellite map couldn't load, so the drawing is shown. It needs internet, and it doesn't load inside the Claude app.");
+          if (!tileOk && tileErr >= 3) failMap("The satellite map couldn't load, so the site plan is shown. It needs internet, and it doesn't load inside the Claude app.");
         }).addTo(map);
       mapLayer = L.layerGroup().addTo(map);
       map.setView([12.97, 77.59], 15);
     } catch (e) {
       map = null;
-      failMap("The satellite map couldn't start, so the drawing is shown.");
+      failMap("The satellite map couldn't start, so the site plan is shown.");
     }
   }
 
   function applyView() {
     var wantMap = view === "map" && hasLeaflet && !mapFailed;
     if (view === "map" && !hasLeaflet && $("mapNote").hidden) {
-      $("mapNote").textContent = "The satellite map needs internet, so the drawing is shown.";
+      $("mapNote").textContent = "The satellite map needs internet, so the site plan is shown.";
       $("mapNote").hidden = false;
     }
     $("map").hidden = !wantMap;
@@ -579,10 +991,12 @@ details p { margin: 0 0 8px; }
     $("map").hidden = !showMap;
     $("mapCap").hidden = !showMap;
     $("drawing").hidden = showMap;
+    $("legend").hidden = !showMap;
     $("view-map").setAttribute("aria-pressed", String(showMap));
     $("view-draw").setAttribute("aria-pressed", String(!showMap));
     $("view-map").disabled = !hasLeaflet || mapFailed;
     if (showMap) { map.invalidateSize(); mapSig = ""; renderMap(); }
+    else renderPlan();
   }
 
   function renderMap() {
@@ -744,10 +1158,12 @@ details p { margin: 0 0 8px; }
       $("rtcNote").textContent = "";
       $("units").innerHTML = ""; $("units").hidden = true;
     }
-    renderShape(r);
+    renderLegend();
+    renderPlan();
     renderMap();
     renderInside(r);
     renderWarns(r);
+    renderExports(r);
 
     $("lists").innerHTML =
       listGroup("farm", "Farm corners", "sw-farm", state.corners, letter, true) +
